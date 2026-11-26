@@ -201,8 +201,6 @@ v1 vẫn nhanh, không lỗi, còn rẻ hơn, nên mọi metric hạ tầng đ�
 
 ## 5. Benchmark scaling (production, Locust headless, 100 users, 2 phút)
 
-| Số instance | RPS | p50 (ms) | p95 (ms) | p99 (ms) | Failures |
-|---|---|---|---|---|---|
 Số liệu dòng `/ask` trong `benchmark-results/scale_1_stats.csv` và `scale_3_stats.csv` (mỗi agent giới hạn 0.5 CPU / 256 MB).
 
 | Số instance | RPS | p50 (ms) | p95 (ms) | p99 (ms) | Failures |
@@ -221,10 +219,27 @@ Số liệu dòng `/ask` trong `benchmark-results/scale_1_stats.csv` và `scale_
 
 ## 6. Kết luận
 
-- 3 điều bạn học được về benchmark & observability:
-  1. ...
-  2. ...
-  3. ...
-- Nếu đưa agent này lên production thật, bạn sẽ thêm metric / alert nào nữa?
-
-...
+- **3 điều học được về benchmark & observability:**
+  1. **Average che giấu tail latency.**
+     - Ở 7.4, avg 247.9 ms trông ổn, nhưng p99 là 1859 ms.
+     - Ở 2.2, tăng `MOCK_SLOW_RATE` lên 0.1 làm p95 tăng 3.6 lần trong khi avg chỉ tăng 1.7 lần.
+     - SLO phải đặt theo p95/p99, và cần đủ mẫu: 300 request chưa đủ để p99 ổn định.
+  2. **Metric hạ tầng chỉ thấy điều chính service đó nhìn thấy.**
+     - Thí nghiệm E (agent v1) làm chất lượng sụp nhưng không alert nào kêu.
+     - Thí nghiệm D có lỗi 504 ở Nginx mà error rate của agent vẫn xanh.
+     - Chất lượng phải đo bằng eval / quality gate; tính sẵn sàng phải đo từ tầng load balancer hoặc synthetic check bên ngoài.
+  3. **Scale ngang không chữa được mọi thứ.**
+     - Lên 3 instance chỉ làm p95 giảm từ 790 xuống 670 ms; p50/p99 không đổi vì nút thắt là LLM.
+     - Trace cho thấy ngay 98% thời gian nằm ở span `chat`.
+     - Phải đo (trace, load test) trước khi quyết định tối ưu chỗ nào.
+- **Nếu đưa agent này lên production thật, mình sẽ thêm:**
+  - **Chất lượng:**
+    - Synthetic eval định kỳ trên URL thật, xuất `agent_eval_accuracy`, alert khi tụt.
+    - Alert khi retrieval hit ratio giảm đột ngột.
+    - Metric tỉ lệ thumbs-down từ người dùng.
+  - **Chi phí:** alert theo **cost / request** (không chỉ cost/giờ tuyệt đối, vì ở 100 users ngưỡng $2/giờ đã kêu chỉ vì traffic tăng), cộng budget theo user/API key.
+  - **LLM:**
+    - Error rate và latency riêng của upstream LLM (`llm_requests_total{status}`).
+    - Timeout + retry; đếm số lần retry.
+  - **Tầng ngoài:** metric/alert ở Nginx (tỉ lệ 5xx/504 do LB trả) và uptime check từ bên ngoài.
+  - **Saturation:** alert khi `agent_in_flight_requests` cao kéo dài, đây là tín hiệu cần scale trước khi p95 vỡ SLO.
