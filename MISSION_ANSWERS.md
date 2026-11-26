@@ -80,10 +80,52 @@ So sánh hai file trong `06-lab-complete/`:
 ## Part 4: API Security
 
 ### Exercise 4.1-4.3: Test results
-_TODO_
+
+**4.1 — API key (bản develop, `AGENT_API_KEY=secret-key-123`):**
+```text
+$ curl -i -X POST localhost:8021/ask -H 'Content-Type: application/json' -d '{"question":"Hello"}'
+HTTP/1.1 401 Unauthorized
+{"detail":"Missing API key. Include header: X-API-Key: <your-key>"}
+
+$ curl -i -X POST localhost:8021/ask -H 'X-API-Key: secret-key-123' -H 'Content-Type: application/json' -d '{"question":"Hello"}'
+HTTP/1.1 200 OK
+{"question":"Hello","answer":"Tôi là AI agent được deploy lên cloud. Câu hỏi của bạn đã được nhận."}
+
+$ curl -i -X POST localhost:8021/ask -H 'X-API-Key: wrong' -H 'Content-Type: application/json' -d '{"question":"Hello"}'
+HTTP/1.1 403 Forbidden
+{"detail":"Invalid API key."}
+```
+Bản develop phân biệt **thiếu** key (401) và **sai** key (403). Agent Part 6 của mình trả 401 cho cả hai, theo hợp đồng của script chấm. Lưu ý: bản develop Part 4 đọc `question` từ body JSON; gửi `?question=` thì body rỗng và app trả 500.
+
+**4.2 — JWT (bản production):** lấy token bằng `POST /auth/token` với `{"username":"student","password":"demo123"}`, nhận `access_token` `eyJhbGciOiJI…` (đã che). Gọi `/ask` không có token:
+```text
+HTTP/1.1 401 Unauthorized
+{"detail":"Authentication required. Include: Authorization: Bearer <token>"}
+```
+
+**4.3 — Rate limit (vòng lặp 12 request với cùng token, tài khoản `student` giới hạn 10 req/phút):**
+```text
+req 1..10: HTTP/1.1 200 OK
+req 11: HTTP/1.1 429 Too Many Requests
+req 12: HTTP/1.1 429 Too Many Requests
+
+HTTP/1.1 429 Too Many Requests
+x-ratelimit-limit: 10
+x-ratelimit-remaining: 0
+retry-after: 58
+{"detail":{"error":"Rate limit exceeded","limit":10,"window_seconds":60,"retry_after_seconds":58}}
+```
 
 ### Exercise 4.4: Cost guard implementation
-_TODO_
+**Bản mẫu Part 4** (`04-api-gateway/production/cost_guard.py`): mỗi user có `UsageRecord` theo ngày (input/output tokens, số request). `check_budget(user_id)` chạy **trước** khi gọi LLM: tổng chi phí toàn hệ thống ≥ `global_daily_budget_usd` ($10) → 503; chi phí của user ≥ `daily_budget_usd` ($1) → **402 Payment Required**; gần ngưỡng thì log cảnh báo. Sau khi gọi LLM, `record_usage` cộng token và tính tiền theo giá input/output. Sau 10 request ở trên, `/me/usage` báo `cost_usd: 0.000189`, còn `budget_remaining_usd: 0.999811`. Hạn chế: state nằm trong RAM, restart là mất, và mỗi instance tự đếm riêng.
+
+**Cách mình làm ở Part 6** (`06-lab-complete/app/cost_guard.py`):
+- Cộng dồn chi phí vào **Redis** bằng `INCRBYFLOAT` với hai key `cost:daily:YYYY-MM-DD` và `cost:monthly:YYYY-MM` (UTC), có TTL (2 ngày / 32 ngày) nên tự hết hạn khi sang kỳ mới.
+- `check_budget()` đọc hai key bằng `MGET` trước khi gọi LLM; vượt `DAILY_BUDGET_USD` hoặc `MONTHLY_BUDGET_USD` (đọc từ env) → **402**.
+- `record_cost()` gọi sau khi LLM trả lời, tính `tokens/1000 × giá` rồi cộng vào cả hai key trong một transaction (`MULTI/EXEC`).
+- State trong Redis nên mọi worker/instance dùng chung một ngân sách và còn nguyên sau restart.
+
+**Vì sao cần cả rate limit lẫn cost guard:** rate limit chặn **tốc độ** (chống spam, DoS, một client chiếm hết tài nguyên), cost guard chặn **tổng tiền**. Một client gọi đúng 10 req/phút nhưng liên tục 24/7, hoặc gửi prompt rất dài, vẫn qua được rate limit mà đốt hết ngân sách. Chỉ cost guard mới chặn được trường hợp đó.
 
 ## Part 5: Scaling & Reliability
 
