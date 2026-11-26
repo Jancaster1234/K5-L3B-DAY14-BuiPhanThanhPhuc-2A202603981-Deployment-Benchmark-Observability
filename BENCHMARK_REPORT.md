@@ -124,10 +124,10 @@ jobs:
 
 ### 4.1 Screenshot
 
-- [ ] Dashboard Grafana khi đang có tải (thấy rõ Golden Signals)
-- [ ] Một trace chậm trong Jaeger (thấy span nào chiếm thời gian)
-- [ ] Một trace lỗi trong Jaeger (có event `exception`)
-- [ ] Trang Alerts của Prometheus với ít nhất 1 alert đang **firing**
+- [x] Dashboard Grafana khi đang có tải (thấy rõ Golden Signals)
+- [x] Một trace chậm trong Jaeger (thấy span nào chiếm thời gian)
+- [x] Một trace lỗi trong Jaeger (có event `exception`)
+- [x] Trang Alerts của Prometheus với ít nhất 1 alert đang **firing**
 
 ### 4.2 Thí nghiệm "phá hệ thống"
 
