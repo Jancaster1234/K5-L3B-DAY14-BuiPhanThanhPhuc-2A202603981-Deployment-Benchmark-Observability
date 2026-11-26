@@ -3,15 +3,36 @@
 ## Part 1: Localhost vs Production
 
 ### Exercise 1.1: Anti-patterns found
-1. _TODO_
+Trong `01-localhost-vs-production/develop/app.py`:
+1. **Hardcode secret:** `OPENAI_API_KEY = "sk-hardcoded-..."` và `DATABASE_URL = "postgresql://admin:password123@..."`. Push lên GitHub là lộ key ngay, và key vẫn nằm trong lịch sử git kể cả sau khi xoá.
+2. **Log ra secret:** `print(f"[DEBUG] Using key: {OPENAI_API_KEY}")`. Ai đọc log là có key.
+3. **`print` thay vì logging có cấu trúc:** không có level, không có timestamp, không parse được bằng log aggregator.
+4. **Không có config management:** `DEBUG = True`, `MAX_TOKENS = 500` cố định trong code; đổi môi trường phải sửa code.
+5. **Không có health check:** `GET /health` trả 404, platform không biết agent còn sống để restart.
+6. **Bind `host="localhost"`:** chạy trong container thì không nhận được kết nối từ bên ngoài.
+7. **Port cố định `8000`:** Railway/Render cấp port qua biến `PORT`, app không đọc nên sẽ không nhận traffic.
+8. **`reload=True`:** chế độ dev, tốn tài nguyên và không an toàn khi chạy production.
+9. **Không có graceful shutdown:** nhận SIGTERM là tắt ngay, request đang xử lý bị cắt ngang.
 
 ### Exercise 1.2: Kết quả gọi bản develop
-_TODO_
+```text
+$ curl -X POST "http://localhost:8011/ask?question=Hello"
+{"answer":"Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đi nhé."}
+$ curl -o /dev/null -w "%{http_code}" http://localhost:8011/health
+404
+```
+(Chạy bằng `uvicorn app:app --port 8011` vì cổng 8000 trên máy đang bận.) App trả lời được, nhưng chạy được trên laptop không có nghĩa là sẵn sàng cho production: không có `/health`, secret nằm trong code và bị in ra log.
 
 ### Exercise 1.3: Comparison table
 | Feature | Develop | Production | Why Important? |
 |---------|---------|------------|----------------|
-| Config  | _TODO_  | _TODO_     | _TODO_         |
+| Config | Hardcode trong code (`DEBUG = True`, key, DB URL) | `config.py` đọc từ env (`os.getenv("PORT")`, `OPENAI_API_KEY`, `DEBUG`…) | Cùng một image chạy được ở dev/staging/prod; đổi cấu hình không cần sửa code (12-Factor) |
+| Secrets | `sk-...` và mật khẩu DB nằm trong code, còn bị in ra log | Đọc từ env, không log ra | Lộ key trên GitHub là bị dùng trộm, mất tiền ngay |
+| Logging | `print(...)` | JSON log có level/time (`logging` + format JSON) | Log aggregator (Loki, Datadog) lọc/tìm được; không lộ dữ liệu nhạy cảm |
+| Health check | Không có (`/health` → 404) | `GET /health` (liveness) + `GET /ready` (503 khi chưa sẵn sàng) | Platform biết khi nào restart container, load balancer biết khi nào gửi traffic |
+| Host / Port | `localhost:8000` cố định | `HOST=0.0.0.0`, `PORT` từ env | Container và cloud platform cần bind 0.0.0.0 và port do platform cấp |
+| Shutdown | Tắt ngay | Lifespan + handler SIGTERM, xử lý xong request đang chạy | Deploy/scale down không làm hỏng request của người dùng |
+| Reload | `reload=True` | Không reload | Reload chỉ để dev, tốn tài nguyên và không ổn định |
 
 ## Part 2: Docker
 
@@ -33,10 +54,28 @@ _TODO_
 - Screenshot: `screenshots/dashboard.png`, `screenshots/running.png`, `screenshots/test.png`
 
 ### So sánh `railway.toml` và `render.yaml`
-_TODO_
+So sánh hai file trong `06-lab-complete/`:
+
+| | `railway.toml` | `render.yaml` |
+|---|---|---|
+| Phạm vi | Chỉ cấu hình **một service** (cách build + deploy) | **Blueprint cả hạ tầng**: service web + Redis (`type: keyvalue`) trong một file |
+| Build | `builder = "DOCKERFILE"`, `dockerfilePath` | `runtime: docker`, `rootDir: 06-lab-complete`, `dockerfilePath` (file nằm trong thư mục con nên phải chỉ `rootDir`) |
+| Health check | `healthcheckPath = "/health"`, `healthcheckTimeout` | `healthCheckPath: /health` |
+| Restart | `restartPolicyType = "ON_FAILURE"`, số lần retry | Render tự quản lý, không khai báo |
+| Biến môi trường | **Không có trong file**, đặt bằng dashboard/CLI (`railway variables --set ...`) | Khai báo ngay trong file: giá trị thường ghi thẳng; secret `AGENT_API_KEY` dùng `generateValue: true` (Render tự sinh); `REDIS_URL` lấy bằng `fromService` từ Redis |
+| Redis | Tạo Redis riêng trên Railway, trỏ `REDIS_URL='${{Redis.REDIS_URL}}'` | Khai báo service `keyvalue` và nối tự động qua `fromService` |
+| Port | Railway cấp biến `PORT`, `CMD` của Dockerfile đọc `${PORT:-8000}` | Giống vậy |
+
+**Vì sao khác nhau:** Railway xem file config là "cách build/chạy một service", còn hạ tầng (Redis, biến) tạo trên dashboard. Render theo kiểu Infrastructure-as-Code: một Blueprint mô tả cả hệ thống, nên tạo lại được toàn bộ từ repo. Cả hai đều không được ghi secret thật vào file.
 
 ### Exercise 3.3: Pipeline Cloud Run
-_TODO_
+`cloudbuild.yaml` chạy 4 bước nối tiếp, bước sau chỉ chạy khi bước trước thành công (`waitFor`):
+1. **test:** trong `python:3.11-slim`, cài `requirements.txt` + pytest và chạy `pytest tests/`. Test fail là dừng pipeline.
+2. **build:** `docker build` image, gắn 2 tag `:$COMMIT_SHA` và `:latest`, dùng `--cache-from :latest` để tận dụng layer cache.
+3. **push:** đẩy image lên Container Registry (`gcr.io/$PROJECT_ID/ai-agent`).
+4. **deploy:** `gcloud run deploy` image theo đúng `$COMMIT_SHA` (truy vết được bản nào đang chạy) ở `asia-southeast1`, `min-instances=1` để tránh cold start, `max-instances=10`, 512Mi/1 CPU, timeout 60 s; `ENVIRONMENT` qua `--set-env-vars`, `OPENAI_API_KEY` lấy từ Secret Manager (`--set-secrets`), không nằm trong code.
+
+`service.yaml` mô tả cùng service đó theo kiểu khai báo (Knative `serving.knative.dev/v1`): `minScale 1` / `maxScale 10`, `containerConcurrency: 80` (mỗi instance nhận tối đa 80 request đồng thời, vượt thì scale thêm), request 0.5 CPU / 256Mi, limit 1 CPU / 512Mi, `containerPort: 8000`. Áp dụng bằng `gcloud run services replace service.yaml`, để quản lý cấu hình bằng file trong git thay vì cờ dòng lệnh.
 
 ## Part 4: API Security
 
