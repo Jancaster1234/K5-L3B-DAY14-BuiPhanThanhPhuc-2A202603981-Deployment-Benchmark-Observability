@@ -162,7 +162,22 @@ retry-after: 58
 ## Part 5: Scaling & Reliability
 
 ### Exercise 5.1-5.5: Implementation notes
-_TODO_
+
+**5.1 — Health check (`05-scaling-reliability/develop/app.py`):** `GET /health` là **liveness probe**, trả `status` (`ok`/`degraded` theo % RAM qua `psutil`), `uptime_seconds`, `version`, `environment`. Platform gọi định kỳ; trả non-200 hoặc timeout thì platform **restart** container.
+
+**5.2 — Readiness:** `GET /ready` trả **503** khi đang khởi động, đang shutdown, hoặc dependency chưa kết nối. Load balancer ngừng gửi traffic tới instance đó nhưng **không restart**. Khác biệt cốt lõi:
+- liveness fail nghĩa là process hỏng, phải restart;
+- readiness fail nghĩa là process ổn nhưng tạm thời chưa nhận việc được.
+
+Nếu `/health` phụ thuộc Redis thì Redis chết một chút là mọi instance bị restart hàng loạt, làm sự cố tệ hơn. Vì vậy ở Part 6 mình để `/health` luôn 200, còn `/ready` mới kiểm Redis (đã kiểm bằng script chấm: Redis down thì `/ready` 503, `/health` vẫn 200).
+
+**5.3 — Graceful shutdown:** middleware `track_requests` đếm `_in_flight_requests`. Khi nhận SIGTERM, uvicorn ngừng nhận kết nối mới và gọi phần shutdown của `lifespan`, vòng lặp ở đó chờ tới khi `_in_flight_requests == 0` (có timeout) rồi mới thoát. Agent Part 6: script chấm gửi SIGTERM lúc đang có request, request vẫn trả 200, process thoát với exit code 0; `docker stop` tắt xong trong 1.5 s, exit code 0.
+
+**5.4 — Stateless + scale (`production/`):** session và conversation history lưu trong Redis (`setex session:<id>` có TTL 1 giờ), không lưu trong RAM. Mỗi instance có `INSTANCE_ID` riêng. Nginx (`upstream agent_cluster`, `server agent:8000`) chia request cho 3 replica, gắn header `X-Served-By`, và `proxy_next_upstream error timeout http_503` (thử tối đa 3 lần) để tự chuyển sang instance khác khi một instance lỗi hoặc đang tắt.
+
+**5.5 — `test_stateless.py`:** tạo một session, gửi 5 câu liên tiếp qua Nginx `:8080` (`POST /chat`), rồi đọc history. Mong đợi: `served_by` đổi giữa các instance nhưng history vẫn đủ 5 lượt. Đó là bằng chứng state nằm trong Redis chứ không nằm trong instance. Nếu lưu trong RAM thì request rơi vào instance khác sẽ "quên" cuộc hội thoại.
+
+_Chưa chạy được stack 5.4/5.5 trước hạn nộp: stack này dùng cổng 8080, đang bị stack observability của Part 7 chiếm. Phần trên mô tả từ code. Tính stateless đã được kiểm thật trên agent Part 6: script chấm restart agent, rate limit vẫn trả 429 vì state nằm trong Redis._
 
 ## Part 6: Final Project
 
