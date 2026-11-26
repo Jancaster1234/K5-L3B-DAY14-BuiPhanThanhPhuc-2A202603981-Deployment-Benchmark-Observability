@@ -82,7 +82,10 @@ _Chưa chạy được stack 2.4 trước hạn nộp: Docker Hub đang giới h
 ## Part 3: Cloud Deployment
 
 ### Exercise 3.1 / 3.2: Deploy agent Part 6
-- URL: _TODO_
+- Nền tảng: **Railway** (Exercise 3.1), deploy chính agent Part 6 (`06-lab-complete/`) kèm Redis của Railway
+- URL: https://agent-production-9e5a9744.up.railway.app
+- 4 lệnh tự kiểm ở CP6: `/health` 200, `/ready` 200, `/ask` không key 401, có key 200 (chi tiết trong `DEPLOYMENT.md`)
+- Cách làm: `railway init` → `railway add --database redis` → `railway add --service agent` với các biến (`AGENT_API_KEY`, `REDIS_URL=${{Redis.REDIS_URL}}`…) → `railway up --service agent` từ `06-lab-complete/` → `railway domain`
 - Screenshot: `screenshots/dashboard.png`, `screenshots/running.png`, `screenshots/test.png`
 
 ### So sánh `railway.toml` và `render.yaml`
