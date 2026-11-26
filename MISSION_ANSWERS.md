@@ -77,7 +77,23 @@ client ──▶ nginx :80/:443 (reverse proxy, upstream agent_backend)
 - Secret đọc từ `env_file: .env.local` (nằm trong `.gitignore`).
 - Nginx: `location /` và `/health` đều `proxy_pass http://agent_backend`; client không gọi thẳng agent được.
 
-_Chưa chạy được stack 2.4 trước hạn nộp: Docker Hub đang giới hạn tốc độ pull (lỗi 429) ở máy mình, và stack cần thêm `qdrant`, `nginx:alpine`. Phần trên mô tả từ file cấu hình, chưa có output test qua Nginx._
+**Kết quả chạy thật (test qua Nginx):**
+```text
+$ touch .env.local && docker compose -p k5-day14-docker up -d --build
+k5-day14-docker-agent-1  Up (healthy)
+k5-day14-docker-nginx-1  Up
+k5-day14-docker-qdrant-1 Up (healthy)
+k5-day14-docker-redis-1  Up (healthy)
+
+$ curl -i http://localhost/health
+HTTP/1.1 200 OK
+{"status":"ok","uptime_seconds":7.6,"version":"2.0.0","timestamp":"2026-11-26T16:49:45.865619"}
+
+$ curl -i -X POST http://localhost/ask -H 'Content-Type: application/json' -d '{"question":"What is Docker"}'
+HTTP/1.1 200 OK
+{"answer":"Container là cách đóng gói app để chạy ở mọi nơi. Build once, run anywhere!"}
+```
+Ngay sau `up`, gọi qua Nginx bị **502 Bad Gateway** trong vài giây. Lúc đó agent đang `health: starting`, Nginx chưa có backend nào sẵn sàng. Khi agent chuyển `healthy` thì trả 200. Redis và qdrant `healthy` trước agent đúng như `depends_on: condition: service_healthy`. Agent không map cổng ra host, chỉ Nginx mở cổng 80, nên mọi traffic phải đi qua reverse proxy.
 
 ## Part 3: Cloud Deployment
 
