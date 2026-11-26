@@ -227,9 +227,26 @@ Total messages: 10
 ## Part 6: Final Project
 
 ### Output `check_production_ready.py` (📋 Checklist Deliverable)
+Chạy đầy đủ (không `--static-only` / `--skip-docker`) trong container Linux `python:3.11-slim` (`os.name = posix`), dùng Docker của máy qua `/var/run/docker.sock` và `--network host`. Lý do: Python trên Windows không gửi được SIGTERM.
 ```text
-_TODO: dán output của lần chạy đầy đủ trong WSL_
+  📋 Checklist Deliverable
+     ✅ Dockerfile (multi-stage, < 500 MB)
+     ✅ docker-compose.yml (agent + redis)
+     ✅ .dockerignore
+     ✅ Health check endpoint (GET /health)
+     ✅ Readiness endpoint (GET /ready)
+     ✅ API Key authentication
+     ✅ Rate limiting
+     ✅ Cost guard
+     ✅ Config từ environment variables
+     ✅ Structured logging
+     ✅ Graceful shutdown
+     ✅ Public URL ready (Railway / Render config)
+----------------------------------------------------------------
+  Result: 12/12 tiêu chí đạt · 43/43 checks passed
+  🎉 PASS 12/12 — PRODUCTION READY! Deploy nào!
 ```
+Chi tiết đáng chú ý: image 63 MB; `docker stop` exit code 0 trong 1.1 s; SIGTERM lúc đang có request → request vẫn 200, exit code 0; Redis mất kết nối → `/ready` 503, `/health` vẫn 200; restart agent vẫn bị 429 (state trong Redis).
 
 ## AI log
 
