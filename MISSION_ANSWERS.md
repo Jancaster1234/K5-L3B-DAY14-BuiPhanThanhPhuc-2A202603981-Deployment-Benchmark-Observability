@@ -36,16 +36,48 @@ $ curl -o /dev/null -w "%{http_code}" http://localhost:8011/health
 
 ## Part 2: Docker
 
-### Exercise 2.1: Dockerfile questions
-1. Base image: _TODO_
+### Exercise 2.1: Dockerfile questions (`02-docker/develop/Dockerfile`)
+1. **Base image:** `python:3.11`, bản Python đầy đủ (có compiler, header, công cụ build), nặng gần 1 GB.
+2. **Working directory:** `WORKDIR /app`. Mọi lệnh `COPY`/`RUN`/`CMD` sau đó chạy trong `/app`.
+3. **Vì sao `COPY requirements.txt` trước rồi mới `COPY app.py`:** tận dụng layer cache. Docker build lại từ layer đầu tiên bị thay đổi trở đi. Code đổi thường xuyên, requirements ít đổi; copy requirements và `pip install` trước thì sửa code chỉ build lại layer copy code (vài giây), không phải cài lại dependencies.
+4. **CMD vs ENTRYPOINT:** `CMD ["python", "app.py"]` là lệnh mặc định, bị thay thế hoàn toàn khi chạy `docker run image <lệnh khác>`. `ENTRYPOINT` là phần cố định luôn chạy, tham số của `docker run` được nối thêm vào sau. Dùng exec form (`[...]`) để process là PID 1 và nhận được SIGTERM.
+
+### Exercise 2.2: Chạy container develop
+```text
+$ docker build -f 02-docker/develop/Dockerfile -t my-agent:develop .
+$ docker run -d -p 8031:8000 my-agent:develop
+$ curl -X POST "localhost:8031/ask?question=What%20is%20Docker"
+{"answer":"Container là cách đóng gói app để chạy ở mọi nơi. Build once, run anywhere!"}
+```
 
 ### Exercise 2.3: Image size comparison
-- Develop: _TODO_ MB
-- Production: _TODO_ MB
-- Difference: _TODO_ %
+Đo bằng `docker images` (dung lượng image giải nén trên đĩa):
+- Develop (`my-agent:develop`, single-stage `python:3.11`): **1.67 GB ≈ 1670 MB**
+- Production (`my-agent:advanced`, multi-stage `python:3.11-slim`): **240 MB**
+- Difference: **giảm ≈ 85.6%** ((1670 − 240) / 1670)
+
+(`docker image inspect -f '{{.Size}}'` báo dung lượng nén: 426,319,957 byte ≈ 407 MiB so với 57,409,026 byte ≈ 55 MiB, giảm 86.5%. Hai cách đo cho cùng kết luận.)
+
+**Multi-stage giảm dung lượng ở đâu:** stage `builder` cài `gcc`, `libpq-dev` và build các package; stage `runtime` bắt đầu lại từ `python:3.11-slim` sạch và chỉ `COPY --from=builder /root/.local`, tức chỉ lấy package đã cài. Compiler, header, cache apt nằm lại ở builder, không vào image cuối. Image production còn chạy bằng user non-root `appuser` và có `HEALTHCHECK`.
 
 ### Exercise 2.4: Docker Compose stack
-_TODO_
+Sơ đồ `02-docker/production/docker-compose.yml`:
+```text
+client ──▶ nginx :80/:443 (reverse proxy, upstream agent_backend)
+              │
+              ▼
+           agent :8000 (build target "runtime", uvicorn --workers 2, healthcheck /health)
+              │                         │
+              ▼                         ▼
+     redis:7-alpine :6379        qdrant:v1.9.0 :6333
+     (cache / session)           (vector DB)
+     ── tất cả trong network nội bộ "internal"; chỉ nginx mở cổng ra ngoài ──
+```
+- `agent` có `depends_on` redis và qdrant với `condition: service_healthy`, nên chỉ khởi động khi hai service kia đã healthy.
+- Secret đọc từ `env_file: .env.local` (nằm trong `.gitignore`).
+- Nginx: `location /` và `/health` đều `proxy_pass http://agent_backend`; client không gọi thẳng agent được.
+
+_Chưa chạy được stack 2.4 trước hạn nộp: Docker Hub đang giới hạn tốc độ pull (lỗi 429) ở máy mình, và stack cần thêm `qdrant`, `nginx:alpine`. Phần trên mô tả từ file cấu hình, chưa có output test qua Nginx._
 
 ## Part 3: Cloud Deployment
 
