@@ -180,7 +180,33 @@ Nếu `/health` phụ thuộc Redis thì Redis chết một chút là mọi inst
 
 **5.5 — `test_stateless.py`:** tạo một session, gửi 5 câu liên tiếp qua Nginx `:8080` (`POST /chat`), rồi đọc history. Mong đợi: `served_by` đổi giữa các instance nhưng history vẫn đủ 5 lượt. Đó là bằng chứng state nằm trong Redis chứ không nằm trong instance. Nếu lưu trong RAM thì request rơi vào instance khác sẽ "quên" cuộc hội thoại.
 
-_Chưa chạy được stack 5.4/5.5 trước hạn nộp: stack này dùng cổng 8080, đang bị stack observability của Part 7 chiếm. Phần trên mô tả từ code. Tính stateless đã được kiểm thật trên agent Part 6: script chấm restart agent, rate limit vẫn trả 429 vì state nằm trong Redis._
+**Kết quả chạy thật 5.4 + 5.5:**
+```text
+$ docker compose -p k5-day14-scaling up -d --build --scale agent=3
+k5-day14-scaling-agent-1 Up (healthy)
+k5-day14-scaling-agent-2 Up (healthy)
+k5-day14-scaling-agent-3 Up (healthy)
+k5-day14-scaling-nginx-1 Up
+k5-day14-scaling-redis-1 Up (healthy)
+
+$ python test_stateless.py
+Session ID: da982621-0853-434c-a924-d402bb467cd8
+Request 1: [instance-92b385]
+Request 2: [instance-c49c1c]
+Request 3: [instance-2eeb8b]
+Request 4: [instance-92b385]
+Request 5: [instance-c49c1c]
+Instances used: {'instance-c49c1c', 'instance-2eeb8b', 'instance-92b385'}
+✅ All requests served despite different instances!
+--- Conversation History ---
+Total messages: 10
+✅ Session history preserved across all instances via Redis!
+```
+**Giải thích:**
+- Nginx chia 5 request của cùng một session theo round-robin cho cả 3 instance (92b385 → c49c1c → 2eeb8b → lặp lại).
+- Không instance nào thấy đủ 5 lượt hội thoại trong RAM của mình, vậy mà history vẫn đủ 10 tin nhắn (5 câu hỏi + 5 câu trả lời). Mỗi instance đọc và ghi session vào cùng một Redis. Đó là bằng chứng agent stateless.
+- Nếu lưu history trong RAM thì mỗi instance chỉ thấy 1–2 lượt và cuộc hội thoại bị "đứt" mỗi khi Nginx chuyển sang instance khác.
+- Xong thì dọn bằng `docker compose -p k5-day14-scaling down`.
 
 ## Part 6: Final Project
 
